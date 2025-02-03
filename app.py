@@ -1,238 +1,319 @@
 import pandas as pd
-import streamlit as st
 import requests
-from requests.exceptions import RequestException
+import streamlit as st
+from utils import call_visualizer_api, log_test_result, initialize_session_state, generate_test_case_name
 
 # Streamlit Page Configuration
 st.set_page_config(page_title="Data Validator", layout="wide")
 
-# Helper function for fetching API token
-def get_access_token():
-    return "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IlE0QzM4eE1iSHdpLVFOdmNRRzJuNiJ9.eyJpc3MiOiJodHRwczovL2J5dGVyaWRnZS1hdXRoMC11YXQudXMuYXV0aDAuY29tLyIsInN1YiI6Imdvb2dsZS1vYXV0aDJ8MTA0MzY1NDEwMjk1ODkzNzkyMzIwIiwiYXVkIjpbImh0dHBzOi8vYnl0ZXJpZGdlLWF1dGgwLXVhdC51cy5hdXRoMC5jb20vYXBpL3YyLyIsImh0dHBzOi8vYnl0ZXJpZGdlLWF1dGgwLXVhdC51cy5hdXRoMC5jb20vdXNlcmluZm8iXSwiaWF0IjoxNzMzOTA5OTI2LCJleHAiOjE3MzM5OTYzMjYsInNjb3BlIjoib3BlbmlkIHByb2ZpbGUgZW1haWwiLCJhenAiOiI5cDNhRXpWc0F2QzJqNWNGcGtObWlJMm5zTzNmTXVldiJ9.sHk8pKG53PDtA9DMF9a3zib9Z9F5jhPATXHtUAM4sBcmbMTWfTr9S2vJ9RlbwRKZVbnHjcEtzzuethKRYhim327LV43X4m8mOaaf3QP40kh5AR4KsfV_1--ZLEOta2lQ_HpF3JDWRlTGgFa9vDOmgZIGvs7Wfsxux0fMB3gFuapfnG5e6ZApgXdhLTfW15Da9HVnSftC9TlrvAGWXOLsWMmHUVx8Yt-TKoBD7vVWMRLKFgUpR7GwCKTJxvrcWz9P5NtwNKkCsAnjL8FpOCFKkTUTVPjD4WGzhkQGeOuiF5sBiSY8f-9CWlmSDog-EXcpg76-gLGlmuC_IAF9xVtfrQ"  # Add your access token here
+# Main Streamlit App
+def main():
+    # Initialize session state variables
+    initialize_session_state()
 
-# Function to call the visualizer API
-def call_visualizer_api(data, user_prompt, chart_type="bubble"):
-    url = "https://gen-ai-visualizer-api-uat.byteridge.com/api/visualize/generate-chart"
-    token = get_access_token()
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {token}",
-    }
+    # Title and Sidebar Setup
+    st.title("📊 Data Validator")
+    st.sidebar.title("🔍 Upload and Analyze Data")
 
-    # Convert timestamp columns to string for JSON serialization
-    data = data.copy()
-    for col in data.select_dtypes(include=["datetime", "datetime64"]):
-        data[col] = data[col].dt.strftime("%Y-%m-%d %H:%M:%S")
-
-    payload = {
-        "chartType": chart_type,
-        "data": data.to_dict(orient="records"),
-        "userPrompt": user_prompt,
-    }
-
-    try:
-        response = requests.post(url, json=payload, headers=headers)
-        response.raise_for_status()
-        return response.json()
-    except RequestException as e:
-        st.error(f"API call failed: {str(e)}")
-        raise
-
-# Initialize session state variables
-if 'uploaded_file' not in st.session_state:
-    st.session_state.uploaded_file = None
-if 'data' not in st.session_state:
-    st.session_state.data = None
-if 'api_response' not in st.session_state:
-    st.session_state.api_response = None
-if 'user_prompt' not in st.session_state:
-    st.session_state.user_prompt = ""
-if 'filtered_data' not in st.session_state:
-    st.session_state.filtered_data = None
-if 'grouped_data' not in st.session_state:
-    st.session_state.grouped_data = None
-if 'comparison_table' not in st.session_state:
-    st.session_state.comparison_table = None
-
-# Title and Sidebar Setup
-st.title("📊 Data Validator")
-st.sidebar.title("🔍 Upload and Analyze Data")
-
-# File Upload and Processing
-uploaded_file = st.sidebar.file_uploader("Upload an Excel or CSV File", type=["xls", "xlsx", "csv"])
-
-# Check if a new file is uploaded
-if uploaded_file and uploaded_file != st.session_state.uploaded_file:
-    st.session_state.uploaded_file = uploaded_file
-    try:
-        # Detect file type and load data
-        if uploaded_file.name.endswith(".csv"):
-            st.session_state.data = pd.read_csv(uploaded_file)
-        else:
-            st.session_state.data = pd.read_excel(uploaded_file)
-
-        # Reset other session state variables
-        st.session_state.api_response = None
-        st.session_state.user_prompt = ""
-        st.session_state.filtered_data = None
-        st.session_state.grouped_data = None
-        st.session_state.comparison_table = None
-    except Exception as e:
-        st.error(f"Error occurred while processing the uploaded file: {str(e)}")
-
-if st.session_state.data is not None:
-    # Display the uploaded data
-    st.subheader("📂 Uploaded Data")
-    st.dataframe(st.session_state.data.style.set_properties(**{'text-align': 'center'}).set_table_styles(
-        [{'selector': 'th', 'props': [('text-align', 'center')]}]), use_container_width=True)
-
-    # Enter analysis prompt
-    st.subheader("💬 Enter Analysis Prompt")
-    user_prompt = st.text_area(
-        "Provide a description for the analysis",
-        value=st.session_state.user_prompt
+    # File Upload and Processing
+    uploaded_file = st.sidebar.file_uploader(
+        "Upload an Excel or CSV File", type=["xls", "xlsx", "csv"]
     )
-    st.session_state.user_prompt = user_prompt
 
-    # Disable the fetch API button if the user prompt is empty
-    fetch_api_disabled = not bool(user_prompt)
+    # Test Case Description Field (moved before Chart Type)
+    st.sidebar.subheader("📝 Test Case Description")
+    test_case_description = st.sidebar.text_area(
+        "Enter a detailed description for this test case",
+        value=""
+    )
+    st.session_state.test_case_description = test_case_description
 
-    if st.button("🔗 Fetch API", disabled=fetch_api_disabled):
-        if user_prompt:
-            try:
-                # Directly update the API Results instead of creating a separate section
-                st.session_state.api_response = call_visualizer_api(st.session_state.data, user_prompt)
-                st.write("API Response Metadata:", st.session_state.api_response.get("chartSummary"))
+    if uploaded_file is not None:
+        try:
+            # Detect file type and load data
+            if uploaded_file.name.endswith(".csv"):
+                data = pd.read_csv(uploaded_file)
+            else:
+                data = pd.read_excel(uploaded_file)
 
-                # Extract the API data and display it
-                api_data = pd.DataFrame(st.session_state.api_response["chartConfig"]["data"]["datasets"][0]["data"],
-                                        columns=["AggregatedValue"])
-                group_column = st.session_state.api_response["dataProcessing"]["groupBy"]
-                api_data[group_column] = st.session_state.api_response["chartConfig"]["data"]["labels"]
+            # Ensure datetime columns are properly converted
+            for col in data.columns:
+                if pd.api.types.is_datetime64_any_dtype(data[col]):
+                    data[col] = pd.to_datetime(data[col])
 
-                # Reset comparison table when new API call is made
-                st.session_state.comparison_table = None
-            except Exception as e:
-                st.error(f"Error occurred while processing the uploaded file: {str(e)}")
-
-    # Dynamic Filters
-    st.sidebar.subheader("🔍 Apply Filters")
-    filtered_data = st.session_state.data.copy()  # Create a copy of the original data
-
-    # Apply filters if data exists
-    if st.session_state.data is not None:
-        for col in st.session_state.data.columns:
-            if pd.api.types.is_datetime64_any_dtype(st.session_state.data[col]):
-                # Date range filter for datetime columns
-                min_date = st.session_state.data[col].min().date()
-                max_date = st.session_state.data[col].max().date()
-                date_range = st.sidebar.date_input(
-                    f"Select Date Range for {col}",
-                    [min_date, max_date]
-                )
-                filtered_data = filtered_data[
-                    (pd.to_datetime(filtered_data[col]).dt.date >= date_range[0]) &
-                    (pd.to_datetime(filtered_data[col]).dt.date <= date_range[1])
-                ]
-
-            elif pd.api.types.is_numeric_dtype(st.session_state.data[col]):
-                # Slider for numeric columns
-                min_val = st.session_state.data[col].min()
-                max_val = st.session_state.data[col].max()
-                numeric_range = st.sidebar.slider(
-                    f"Select Range for {col}",
-                    min_value=float(min_val),  # Use float to handle decimal values
-                    max_value=float(max_val),
-                    value=(float(min_val), float(max_val))
-                )
-                filtered_data = filtered_data[
-                    (filtered_data[col] >= numeric_range[0]) &
-                    (filtered_data[col] <= numeric_range[1])
-                ]
-
-            elif pd.api.types.is_string_dtype(st.session_state.data[col]):
-                # Multi-select for categorical columns
-                unique_values = st.session_state.data[col].unique()
-                selected_values = st.sidebar.multiselect(
-                    f"Select Values for {col}",
-                    options=unique_values,
-                    default=unique_values
-                )
-                filtered_data = filtered_data[filtered_data[col].isin(selected_values)]
-
-    st.session_state.filtered_data = filtered_data
-
-    # Display filtered data
-    st.subheader("📂 Filtered Data")
-    st.dataframe(st.session_state.filtered_data.style.set_properties(**{'text-align': 'center'}).set_table_styles(
-        [{'selector': 'th', 'props': [('text-align', 'center')]}]), use_container_width=True)
-
-    # Display API results if they exist
-    if st.session_state.api_response:
-        st.subheader("🔍 API Results")
-        api_data = pd.DataFrame(st.session_state.api_response["chartConfig"]["data"]["datasets"][0]["data"],
-                                columns=["AggregatedValue"])
-        group_column = st.session_state.api_response["dataProcessing"]["groupBy"]
-        api_data[group_column] = st.session_state.api_response["chartConfig"]["data"]["labels"]
-        st.dataframe(api_data.style.set_properties(**{'text-align': 'center'}).set_table_styles(
-            [{'selector': 'th', 'props': [('text-align', 'center')]}]), use_container_width=True)
-
-    # Ensure API response exists before proceeding
-    if st.session_state.api_response:
-        # Select columns for grouping and aggregation (prefill dropdowns)
-        group_column = st.sidebar.selectbox(
-            "📊 Select a Column to Group By",
-            options=[None] + list(st.session_state.filtered_data.columns),
-            index=st.session_state.filtered_data.columns.get_loc(st.session_state.api_response["dataProcessing"]["groupBy"]) + 1
-        )
-
-        numeric_columns = st.session_state.filtered_data.select_dtypes(include=["number"]).columns
-        agg_column = st.sidebar.selectbox(
-            "🔢 Select a Numeric Column to Analyze",
-            options=[None] + list(numeric_columns),
-            index=numeric_columns.get_loc(st.session_state.api_response["dataProcessing"]["valueField"]) + 1
-        )
-
-        # Check if a group has been applied and if both group_column and agg_column are selected
-        if group_column and agg_column:
-            st.session_state.grouped_data = st.session_state.filtered_data.groupby(group_column)[agg_column].sum().reset_index()
-
-            st.subheader("📊 Grouped Data")
-            st.dataframe(st.session_state.grouped_data.style.set_properties(**{'text-align': 'center'}).set_table_styles(
-                [{'selector': 'th', 'props': [('text-align', 'center')]}]), use_container_width=True)
-
-        # Show the "Compare Results" button
-        if st.button("🔗 Compare Results"):
-            # Comparison Table logic
-            st.subheader("📋 Comparison Table")
-
-            # Create comparison table using session state data
-            api_data = pd.DataFrame(st.session_state.api_response["chartConfig"]["data"]["datasets"][0]["data"],
-                                    columns=["AggregatedValue"])
-            group_column = st.session_state.api_response["dataProcessing"]["groupBy"]
-            api_data[group_column] = st.session_state.api_response["chartConfig"]["data"]["labels"]
-
-            comparison_table = st.session_state.grouped_data.merge(api_data, left_on=group_column, right_on=group_column, how="outer")
-
-            # Rename columns
-            comparison_table.rename(columns={st.session_state.api_response["dataProcessing"]["valueField"]: "Preprocessed Result", "AggregatedValue": "API Value"}, inplace=True)
-
-            # Add a column to indicate pass/fail with icons
-            comparison_table["Test_Result"] = comparison_table.apply(
-                lambda row: "✅" if row["Preprocessed Result"] == row["API Value"] else "❌",
-                axis=1
+            # Display the uploaded data
+            st.subheader("📂 Uploaded Data")
+            st.dataframe(
+                data.style.set_properties(**{"text-align": "center"}).set_table_styles(
+                    [{"selector": "th", "props": [("text-align", "center")]}]
+                ),
+                use_container_width=True,
             )
 
-            st.session_state.comparison_table = comparison_table
+            chart_type_options = ["bar", "pie", "bubble", "scatter", "line"]
+            selected_chart_type = st.sidebar.selectbox(
+                "📊 Select Chart Type",
+                options=chart_type_options,
+                index=0  # Default to bar chart
+            )
 
-            st.dataframe(st.session_state.comparison_table.style.set_properties(**{'text-align': 'center'}).set_table_styles(
-                [{'selector': 'th', 'props': [('text-align', 'center')]}]), use_container_width=True)
+            # Initialize filtered data
+            filtered_data = data.copy()
 
-            # Calculate passed and failed counts
-            passed_count = st.session_state.comparison_table["Test_Result"].value_counts().get("✅", 0)
-            failed_count = st.session_state.comparison_table["Test_Result"].value_counts().get("❌", 0)
+            # Select columns for grouping and aggregation (with None as default values)
+            group_column = st.sidebar.selectbox(
+                "📊 Select a Column to Group By",
+                options=[None] + list(filtered_data.columns),
+            )
+            numeric_columns = filtered_data.select_dtypes(include=["number"]).columns
+            agg_column = st.sidebar.selectbox(
+                "🔢 Select a Numeric Column to Analyze",
+                options=[None] + list(numeric_columns),
+            )
 
-            # Display results
-            st.markdown(f"**Total Passed:** {passed_count}  |  **Total Failed:** {failed_count}")
-else:
-    st.info("📤 Please upload an Excel or CSV file to start.")
+            # Dynamic Filters
+            st.sidebar.subheader("🔍 Apply Filters")
+
+            # Multi-select dropdown to select columns for filtering
+            selected_columns = st.sidebar.multiselect(
+                "Select Columns to Filter",
+                options=list(data.columns),
+                key="filter_columns_multiselect",
+            )
+
+            # Render filter UI for selected columns
+            for filter_column in selected_columns:
+                st.sidebar.subheader(f"Filter: {filter_column}")
+
+                # Determine column type and render appropriate filter
+                if pd.api.types.is_datetime64_any_dtype(filtered_data[filter_column]):
+                    # Date range filter for datetime columns
+                    min_date = filtered_data[filter_column].min().date()
+                    max_date = filtered_data[filter_column].max().date()
+                    date_range = st.sidebar.date_input(
+                        f"Select Date Range for {filter_column}",
+                        [min_date, max_date],
+                        key=f"date_filter_input_{filter_column}"
+                    )
+                    filtered_data = filtered_data[
+                        (filtered_data[filter_column].dt.date >= date_range[0])
+                        & (filtered_data[filter_column].dt.date <= date_range[1])
+                    ]
+
+                elif pd.api.types.is_numeric_dtype(filtered_data[filter_column]):
+                    # Slider for numeric columns
+                    min_val = filtered_data[filter_column].min()
+                    max_val = filtered_data[filter_column].max()
+                    numeric_range = st.sidebar.slider(
+                        f"Select Range for {filter_column}",
+                        min_value=float(min_val),  # Use float to handle decimal values
+                        max_value=float(max_val),
+                        value=(float(min_val), float(max_val)),
+                        key=f"numeric_filter_slider_{filter_column}"
+                    )
+                    filtered_data = filtered_data[
+                        (filtered_data[filter_column] >= numeric_range[0])
+                        & (filtered_data[filter_column] <= numeric_range[1])
+                    ]
+
+                elif pd.api.types.is_string_dtype(filtered_data[filter_column]):
+                    # Multi-select for categorical columns
+                    unique_values = filtered_data[filter_column].unique()
+                    selected_values = st.sidebar.multiselect(
+                        f"Select Values for {filter_column}",
+                        options=unique_values,
+                        default=unique_values,
+                        key=f"categorical_filter_multiselect_{filter_column}"
+                    )
+                    filtered_data = filtered_data[
+                        filtered_data[filter_column].isin(selected_values)
+                    ]
+
+            # Display filtered data only if it's different from the original data
+            if not filtered_data.equals(data):
+                st.subheader("📂 Filtered Data")
+                st.dataframe(
+                    filtered_data.style.set_properties(
+                        **{"text-align": "center"}
+                    ).set_table_styles(
+                        [{"selector": "th", "props": [("text-align", "center")]}]
+                    ),
+                    use_container_width=True,
+                )
+
+                # Optional: Display the number of rows in original vs filtered data
+                st.write(f"Original Data Rows: {len(data)} | Filtered Data Rows: {len(filtered_data)}")
+
+            # Group data only if both group_column and agg_column are selected
+            if group_column and agg_column:
+                # Convert group_column to string to ensure compatibility
+                grouped_data = (
+                    filtered_data.groupby(group_column)[agg_column].sum().reset_index()
+                )
+                grouped_data[group_column] = grouped_data[group_column].astype(str)
+                st.session_state.grouped_data = grouped_data  # Store in session state
+                st.subheader("📊 Grouped Data")
+                st.dataframe(
+                    grouped_data.style.set_properties(
+                        **{"text-align": "center"}
+                    ).set_table_styles(
+                        [{"selector": "th", "props": [("text-align", "center")]}]
+                    ),
+                    use_container_width=True,
+                )
+            else:
+                st.warning(
+                    "⚠️ Please select both a column to Group By and a Numeric Column to Analyze."
+                )
+
+            # Enter analysis prompt
+            st.subheader("💬 Enter Analysis Prompt")
+            user_prompt = st.text_area(
+                "Provide a description for the analysis", value=""
+            )
+
+            # Check if all required fields are filled
+            is_compare_ready = (
+                group_column is not None
+                and agg_column is not None
+                and user_prompt.strip() != ""
+            )
+
+            # Create a button with a key to track state
+            compare_button = st.button(
+                "🔗 Compare Results",
+                disabled=not is_compare_ready,
+                key="permanent_compare_button",
+            )
+
+            # Show warning if any required field is missing
+            if not is_compare_ready:
+                if user_prompt.strip() == "":
+                    st.warning("⚠️ Please Enter an Analysis Prompt")
+
+            # Trigger comparison when button is clicked
+            if is_compare_ready and compare_button:
+                st.session_state.show_results = True
+                # Reset session state variables
+                st.session_state.api_response = None
+                st.session_state.comparison_table = None
+                st.session_state.comparison_results = None
+
+            # Render results if show_results is True and we have all necessary data
+            if st.session_state.show_results and group_column and agg_column:
+                try:
+                    st.subheader("🔍 API Results")
+
+                    # Call API only if results haven't been generated
+                    if st.session_state.api_response is None:
+                        # Use stored grouped data for simulated API call
+                        api_response = call_visualizer_api(data, user_prompt, chart_type=selected_chart_type)
+                        st.session_state.api_response = api_response  # Store API response
+
+                    # Use stored API response
+                    api_response = st.session_state.api_response
+
+                    # Convert API response labels to string to ensure compatibility
+                    api_data = pd.DataFrame(
+                        api_response["chartConfig"]["data"]["datasets"][0]["data"],
+                        columns=["AggregatedValue"],
+                    )
+                    api_data[group_column] = [str(label) for label in api_response["chartConfig"]["data"]["labels"]]
+                    st.dataframe(api_data.style.set_properties(**{'text-align': 'center'}).set_table_styles(
+                            [{'selector': 'th', 'props': [('text-align', 'center')]}]), use_container_width=True)
+
+                    st.subheader("📋 Comparison Table")
+                    # Regenerate comparison table only if not already generated
+                    if st.session_state.comparison_table is None:
+                        # Reset the index to ensure matching merge keys
+                        grouped_data_reset = st.session_state.grouped_data.reset_index(drop=True)
+                        api_data_reset = api_data.reset_index(drop=True)
+
+                        # Merge with how='outer' to include all rows
+                        comparison_table = pd.concat([grouped_data_reset, api_data_reset], axis=1)
+
+                        # Rename columns to handle potential conflicts
+                        comparison_table.columns = [
+                            f"{col}_processed" if i < len(grouped_data_reset.columns)
+                            else col
+                            for i, col in enumerate(comparison_table.columns)
+                        ]
+
+                        st.session_state.comparison_table = comparison_table  # Store comparison table
+
+                    # Use stored comparison table
+                    comparison_table = st.session_state.comparison_table
+
+                    # Generate comparison results if not already done
+                    if 'comparison_results' not in st.session_state or st.session_state.comparison_results is None:
+                        # Compare processed data with simulated API data
+                        comparison_results = {"comparisons": []}
+                        processed_group_col = f"{group_column}_processed"
+                        processed_agg_col = f"{agg_column}_processed"
+
+                        for idx, row in comparison_table.iterrows():
+                            comp = {
+                                "processed_label": row[processed_group_col] if pd.notna(row[processed_group_col]) else "N/A",
+                                "processed_value": row[processed_agg_col] if pd.notna(row[processed_agg_col]) else 0,
+                                "api_label": row[group_column] if pd.notna(row[group_column]) else "N/A",
+                                "api_value": row["AggregatedValue"] if pd.notna(row["AggregatedValue"]) else 0,
+                                "label_match": str(row[processed_group_col]) == str(row[group_column]) if pd.notna(row[processed_group_col]) and pd.notna(row[group_column]) else False,
+                                "value_match": abs(row[processed_agg_col] - row["AggregatedValue"]) < 1e-10 if pd.notna(row[processed_agg_col]) and pd.notna(row["AggregatedValue"]) else False
+                            }
+                            comparison_results["comparisons"].append(comp)
+
+                        # Store comparison results in session state for logging
+                        st.session_state.comparison_results = comparison_results
+
+                    # Add a column to indicate pass/fail with icons
+                    comparison_table["Test_Result"] = comparison_table.apply(
+                        lambda row: "✅" if abs(row[f"{agg_column}_processed"] - row["AggregatedValue"]) < 1e-10 else "❌",
+                        axis=1
+                    )
+                    st.dataframe(comparison_table.style.set_properties(**{'text-align': 'center'}).set_table_styles(
+                        [{'selector': 'th', 'props': [('text-align', 'center')]}]), use_container_width=True)
+
+                    # Determine overall test status
+                    test_status = "Passed" if all(comp['value_match'] for comp in st.session_state.comparison_results['comparisons']) else "Failed"
+
+                    # Determine next test case ID
+                    try:
+                        existing_logs = pd.read_csv("VisualizerTests.csv")
+                        next_test_no = existing_logs['Test Case ID'].max() + 1 if not existing_logs.empty else 1
+                    except FileNotFoundError:
+                        next_test_no = 1
+
+                    # Submit button for logging
+                    log_test_case_button = st.button("🔖 Log Test Case")
+
+                    # Check if Test Case Description is empty
+                    if log_test_case_button:
+                        if st.session_state.test_case_description.strip() == "":
+                            st.warning("⚠️ Please enter a Test Case Description before logging")
+                        else:
+                            try:
+                                # Log the test result
+                                result = log_test_result(
+                                    next_test_no,
+                                    st.session_state.test_case_description,
+                                    generate_test_case_name(api_response['dataProcessing']),
+                                    st.session_state.grouped_data,
+                                    st.session_state.api_response,
+                                    test_status
+                                )
+                                if result:
+                                    st.success(result)
+                            except Exception as e:
+                                st.error(f"Error logging test case: {e}")
+
+                except Exception as e:
+                    st.error(f"Error processing results: {e}")
+
+        except Exception as e:
+            st.error(f"Error processing file: {e}")
+    else:
+        st.info("📤 Please upload an Excel or CSV file to start.")
+
+
+if __name__ == "__main__":
+    main()
